@@ -730,3 +730,65 @@ $env:PYTHONUTF8="1"; & "python.exe" "script.py" 2>&1
 - [ ] Word 报告（三线表 + 结果分析文字 + 图表）
 - [ ] 图表文件（PNG 200dpi，已嵌入 Word）
 - [ ] 脚本代码（可复现）
+
+---
+
+## 十、scripts/ 可执行工具脚本
+
+> 位于 `scripts/` 目录下，可直接 `python` 执行或作为模块 `import`。
+
+### 10.1 check_assumptions.py — 前置检验一键工具
+
+```bash
+python scripts/check_assumptions.py data.xlsx --cols HR MAP BIS --group 组别
+python scripts/check_assumptions.py data.xlsx --cols score --vif x1 x2 x3
+```
+- 正态性检验（Shapiro-Wilk / K-S）
+- 方差齐性检验（Levene）
+- 多重共线性诊断（VIF）
+- 彩色终端报告 + 综合建议
+
+### 10.2 anova_pipeline.py — 方差分析流水线
+
+```bash
+python scripts/anova_pipeline.py data.xlsx --indicators HR MAP --group 组别 --time 时间 \
+    --time-order T1 T2 T3 --output result.docx
+```
+- 双因素 ANOVA（组别×时间）
+- LSD 多重比较 → CLD 紧凑字母
+- 三线表 Word 自动输出
+- 可作为模块导入: `from anova_pipeline import do_two_way_anova, cld_from_pmatrix`
+
+### 10.3 questionnaire_pipeline.py — 问卷分析流水线
+
+```bash
+python scripts/questionnaire_pipeline.py data.xlsx \
+    --dims 维度1:Q1,Q2,Q3 维度2:Q4,Q5 --reverse Q3 --kmo --efa 3
+```
+- 数据清洗 + 反向计分
+- Cronbach's α（总量表+各维度）+ CITC
+- KMO + Bartlett → EFA
+- 结果导出 Excel
+
+### 10.4 three_line_table.py — 三线表 Word 生成器
+
+```python
+from three_line_table import ThreeLineTable, create_doc_portrait
+doc = create_doc_portrait()
+ThreeLineTable.add_table_title(doc, '表1 描述性统计')
+ThreeLineTable.build_simple(doc, ['变量','M','SD'], [['X1','3.2','0.8']])
+ThreeLineTable.build_regression(doc, models=[...])  # 回归结果表
+doc.save('output.docx')
+```
+
+### 10.5 plot_utils.py — 学术绘图工具集
+
+```python
+from plot_utils import init_style, grouped_bar, correlation_heatmap, save_figure
+init_style()  # 中文字体 + 200dpi + 去右上边框
+fig, ax = grouped_bar(data, categories, 'Y轴')
+save_figure(fig, 'fig1.png')
+```
+- 配色方案: `OKABE_ITO`, `GROUP_COLORS`, `SIG_COLORS`
+- 图表: `grouped_bar`, `line_with_sem`, `correlation_heatmap`, `did_coefficient_plot`, `roc_plot`
+- 辅助: `add_significance`, `save_figure`
