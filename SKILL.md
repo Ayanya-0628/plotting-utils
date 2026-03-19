@@ -1865,3 +1865,210 @@ def verify_report(docx_path, expected_checks):
 | 交付后客户说"数不对" | 客户用的是不同版本的数据文件 | 确认数据文件版本，记录文件MD5或行数 |
 | 客户中途换了问卷题项分组 | 需求变更 | 铁律J：变更需求实时记录到 Obsidian，全盘重算 |
 
+---
+
+## 二十、防御性代码模板（直接复制粘贴）
+
+> §19 列了坑，本节给出**每个坑对应的可执行修复代码**。新项目直接复制对应模板。
+
+### 20.1 Python 脚本开头必加模板（防编码/随机/路径）
+
+```python
+# -*- coding: utf-8 -*-
+"""
+用途：[描述]
+输入文件：[路径]
+输出文件：[路径]
+日期：YYYY-MM-DD
+"""
+import sys
+import os
+import numpy as np
+import pandas as pd
+
+# ══════ 防御性设置 ══════
+sys.stdout.reconfigure(encoding='utf-8')    # 防 stdout 中文乱码
+np.random.seed(42)                          # 固定随机种子
+
+# 路径统一用 os.path.join，防 Windows/Unix 不兼容
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_FILE = os.path.join(BASE_DIR, '原始数据', '数据.xlsx')
+OUTPUT_DIR = os.path.join(BASE_DIR, '交付成果')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+```
+
+### 20.2 run_command 标准调用模板（防编码/超时/stderr丢失）
+
+```
+正确的 run_command 调用格式（每次都必须遵守）：
+
+CommandLine: $env:PYTHONUTF8="1"; python "C:\path\to\script.py" 2>&1
+Cwd:         C:\Users\16342\Desktop\BaiduSyncdisk\兼职
+WaitMsBeforeAsync: 10000
+SafeToAutoRun: false
+
+❌ 错误写法：
+python script.py                  → 缺 PYTHONUTF8，中文路径必崩
+python script.py && echo done     → PowerShell 不支持 &&，用 ; 替代
+cd C:\path; python script.py      → cd 命令无效，用 Cwd 参数替代
+```
+
+### 20.3 数据读取防御模板（防编码/Sheet错/列名脏/合并键重复）
+
+```python
+# ══════ 数据读取防御 ══════
+def safe_read_excel(filepath, sheet_name=0):
+    """防御性读取 Excel 文件"""
+    df = pd.read_excel(filepath, sheet_name=sheet_name)
+    # 1. 清理列名（去空格、换行、全角）
+    df.columns = (df.columns
+        .str.strip()
+        .str.replace('\n', '', regex=False)
+        .str.replace('\r', '', regex=False)
+        .str.replace('\u3000', '', regex=False))   # 全角空格
+    # 2. 空字符串转 NaN
+    df = df.replace('', np.nan)
+    df = df.replace(r'^\s*$', np.nan, regex=True)
+    # 3. 打印基本信息（铁律L）
+    print(f'Shape: {df.shape}')
+    print(f'Columns: {list(df.columns)}')
+    print(f'Missing: {df.isnull().sum().sum()} cells')
+    return df
+
+def safe_read_sav(filepath):
+    """防御性读取 SPSS .sav 文件"""
+    try:
+        import pyreadstat
+        df, meta = pyreadstat.read_sav(filepath)
+    except ImportError:
+        import savReaderWriter
+        with savReaderWriter.SavReader(filepath, ioUtf8=True) as reader:
+            header = reader.header
+            records = [row for row in reader]
+        df = pd.DataFrame(records, columns=header)
+    print(f'Shape: {df.shape}')
+    return df
+```
+
+### 20.4 编码校验防御模板（防性别计数=0、编码不匹配）
+
+```python
+# ══════ 分类变量编码校验（每个分类变量都必须跑一遍） ══════
+def verify_encoding(df, col, expected_mapping):
+    """校验分类变量编码是否与预期一致
+    
+    用法：verify_encoding(df, '性别', {1: '男', 2: '女'})
+    """
+    actual = df[col].value_counts(dropna=False).to_dict()
+    print(f'\n[编码校验] {col}:')
+    print(f'  实际分布: {actual}')
+    print(f'  预期映射: {expected_mapping}')
+    
+    for code in expected_mapping:
+        if code not in actual:
+            print(f'  ⚠️ 预期编码 {code}({expected_mapping[code]}) 在数据中不存在！')
+    
+    unexpected = set(actual.keys()) - set(expected_mapping.keys()) - {np.nan}
+    if unexpected:
+        print(f'  ⚠️ 数据中存在未预期的编码值: {unexpected}')
+    
+    return actual
+
+# 示例：开工前强制执行
+verify_encoding(df, '性别', {1: '男', 2: '女'})
+verify_encoding(df, 'Group', {1: '实验组', 2: '对照组'})
+```
+
+### 20.5 子集管理防御模板（防样本量不一致）
+
+```python
+# ══════ 子集定义（脚本顶部集中定义，禁止散落在各处） ══════
+# 全体样本
+df_all = df.copy()
+print(f'df_all: n={len(df_all)}')
+
+# 实验组 / 对照组
+df_exp = df[df['Group'] == '实验组'].copy()
+df_ctrl = df[df['Group'] == '对照组'].copy()
+print(f'df_exp: n={len(df_exp)}, df_ctrl: n={len(df_ctrl)}')
+
+# 完整子集（无缺失）
+key_vars = ['age', 'BMI', 'VAS_Pre', 'VAS_Post']
+df_complete = df.dropna(subset=key_vars).copy()
+print(f'df_complete: n={len(df_complete)} (dropped {len(df) - len(df_complete)} rows with missing)')
+
+# ⚠️ 每次使用子集时打印 n，确认与预期一致
+# ⚠️ 禁止在函数内部临时创建子集（找不回来）
+```
+
+### 20.6 Word 报告防御模板（防字体/行距/东亚字体遗漏）
+
+```python
+# ══════ Word 防御性生成（统一用 word_utils） ══════
+import sys
+sys.path.insert(0, r'C:\Users\16342\.antigravity\skills\ace\code_library')
+from word_utils import (create_report_doc, add_three_line_table,
+                        add_body_text, add_note, add_heading,
+                        add_figure_caption, add_figure)
+
+doc = create_report_doc()  # 已自动设好默认字体
+
+# ✅ 正确：表+文字同步生成
+table_num = 0
+
+table_num += 1
+add_three_line_table(doc,
+    headers=['变量', '均值', 'SD', 'P'],
+    data_rows=[['年龄', '65.3', '8.2', '0.832']],
+    title=f'表{table_num} 两组基线特征比较')
+add_note(doc, '注：P值为独立样本t检验结果。')
+add_body_text(doc, f'由表{table_num}可知，两组患者在年龄方面差异无统计学意义（P=0.832>0.05），具有可比性。')
+
+# ❌ 错误：先生成所有表格再回头补文字（违反铁律I）
+# ❌ 错误：用 doc = Document('已有文件.docx') 打开旧文件局部替换（违反§18）
+
+doc.save(os.path.join(OUTPUT_DIR, '分析报告.docx'))
+```
+
+### 20.7 merge 防御模板（防笛卡尔积/行数暴增）
+
+```python
+# ══════ merge 前必检 ══════
+def safe_merge(left, right, on, how='inner'):
+    """带防御的 merge，防止笛卡尔积"""
+    # 检查合并键是否有重复
+    left_dup = left[on].duplicated().sum() if isinstance(on, str) else left[on].duplicated().sum()
+    right_dup = right[on].duplicated().sum() if isinstance(on, str) else right[on].duplicated().sum()
+    if left_dup > 0 or right_dup > 0:
+        print(f'⚠️ 合并键有重复！left: {left_dup}, right: {right_dup}')
+        print(f'    可能导致行数暴增（笛卡尔积）')
+    
+    n_before = len(left)
+    result = pd.merge(left, right, on=on, how=how)
+    n_after = len(result)
+    
+    if n_after > n_before * 1.1:
+        print(f'⚠️ merge 后行数异常增加: {n_before} → {n_after} (+{n_after-n_before})')
+    else:
+        print(f'merge OK: {n_before} → {n_after}')
+    
+    return result
+```
+
+### 20.8 PowerShell 特殊字符转义速查
+
+```
+PowerShell 中以下字符需要特殊处理：
+
+| 字符 | 问题 | 修复方案 |
+|------|------|---------|
+| $    | 被当成变量 | 用单引号包裹：'$var' 或反引号转义：`$var |
+| "    | 字符串边界 | 用反引号转义：`" 或改用单引号包裹 |
+| &    | 调用运算符 | 用引号包裹："&" |
+| ()   | 子表达式 | 用引号包裹或反引号转义 |
+| \n   | 不会被解释为换行 | 在 python -c 中用 ; 分隔语句替代 |
+
+标准模板：
+$env:PYTHONUTF8="1"; & "python.exe" "脚本路径.py" 2>&1
+```
+
