@@ -707,6 +707,38 @@ run.font.size = Pt(8)
 4. 交互效应：差异最大/最小时间点
 5. 结尾"这表明..."因果总结
 
+### 🔴 图文对应铁律（表格/图片/文字必须一一对应）
+
+> **核心原则**：每个表格、每张图后面**必须紧跟**对应的文字分析段落。禁止将多个图堆在一起再统一写文字。
+
+**强制规则**：
+1. **表格后紧跟文字**：`add_three_line_table()` → `add_note()` → `add_body_text()`，三者缺一不可
+2. **图片后紧跟文字**：`doc.add_picture()` → `add_note(图题)` → `add_body_text(图的分析)`
+3. **禁止图堆在一起**：不允许在循环中只插入图片不写分析，然后在循环结束后写一段笼统总结
+4. **饼图分析模板**：`由图X可知，在{特征}方面，{类别1}N人（X%）、{类别2}N人（X%）...其中{最大类}占比最高，达X%。`
+5. **柱状图分析模板**：`由图X可知，在{主题}方面，"{最高项}"选择率最高（X%），"{最低项}"选择率最低（X%）。`
+6. **循环中的图文对应**：在 `for` 循环中生成多张图时，每次迭代内必须包含：图片插入 + 图题注释 + 文字分析段落
+
+**错误示例**（禁止）：
+```python
+# ❌ 所有饼图堆在一起，没有单独分析
+for label, data in items:
+    doc.add_picture(f'{label}.png')
+    add_note(doc, f'图{fnum} {label}')
+    fnum += 1
+# 然后在循环外写一段笼统总结 ← 这样不行！
+```
+
+**正确示例**（必须）：
+```python
+# ✅ 每张图后面紧跟文字分析
+for label, data in items:
+    doc.add_picture(f'{label}.png')
+    add_note(doc, f'图{fnum} {label}')
+    add_bt(doc, f'由图{fnum}可知，... 具体数据分析 ...')
+    fnum += 1
+```
+
 ---
 
 ## 九、通用规范
@@ -730,6 +762,16 @@ $env:PYTHONUTF8="1"; & "python.exe" "script.py" 2>&1
 - [ ] Word 报告（三线表 + 结果分析文字 + 图表）
 - [ ] 图表文件（PNG 200dpi，已嵌入 Word）
 - [ ] 脚本代码（可复现）
+
+### 9.4 SPSS 语法文件 (.sps) 编码铁律
+
+> **核心原则**：如果在 Windows 下生成给客户在 SPSS 中双击打开运行的 `.sps` 语法文件，**必须**使用带有 BOM 的 UTF-8 编码（`utf-8-sig`）。无 BOM 的 `.sps` 会导致 SPSS 读取中文乱码。
+
+**正确示例**（必须遵守）：
+```python
+with open('syntax.sps', 'w', encoding='utf-8-sig') as f:
+    f.write(spss_code)
+```
 
 ---
 
@@ -838,3 +880,74 @@ run_spss_analysis('data.sav', syntax_list, 'output.spv', 'data_with_pred.sav')
 ```powershell
 & "C:\Program Files\IBM\SPSS\Statistics\27\statisticspython3.bat" "run_spss_save_spv.py" 2>&1
 ```
+
+### 11.5 问卷星SAV → SPV 两步法（pyreadstat不兼容时）
+
+> **适用场景**：问卷星导出的SAV文件（header含`pmStation spssw`），pyreadstat/pandas.read_spss报`Invalid file`。
+
+**第一步**：SPSS导出CSV（GBK编码SPS）
+```spss
+GET FILE='原始数据.sav'.
+SAVE TRANSLATE OUTFILE='raw_data.csv'
+  /TYPE=CSV /MAP /REPLACE /FIELDNAMES
+  /KEEP Q1_1 Q2_1 ...
+```
+
+⚠️ **铁律**：
+- SPS文件必须**GBK编码**：`open(f, 'w', encoding='gbk')`
+- **禁止** `/ENCODING='UTF8'`（SPSS 27误解析为密码，报5364）
+- **禁止** `/CELLS=LABELS`（人口学变量导出为文本值标签）
+
+**第二步**：Python读CSV → pyreadstat写干净SAV → 生成SPS
+```python
+df = pd.read_csv('raw_data.csv', encoding='utf-8-sig')
+# 计算均分、分组变量
+# MWU分组变量用$SYSMIS排除法预计算
+for a, b in pairs:
+    df[f'g{a}{b}'] = np.nan
+    df.loc[df['cond']==a, f'g{a}{b}'] = 1.0
+    df.loc[df['cond']==b, f'g{a}{b}'] = 2.0
+pyreadstat.write_sav(df, 'clean.sav', column_labels=..., variable_value_labels=...)
+```
+
+**MWU兼容方案**（SPS中只需一行）：
+```spss
+NPAR TESTS /M-W=PI BY g12(1 2).
+```
+
+**参考脚本**：`3.24创建/代跑spss源文件/step1_export.sps` + `step2_build.py`
+
+## §19 SPSS 语法文件生成铁律（实测验证版 2026-03-25）
+
+### 模板路径
+`C:\Users\16342\.antigravity\skills\ace\code_library\generate_spss_syntax_template.py`
+
+### 五条铁律
+
+1. **编码铁律**
+   - 普通 SPSS 语法 → `encoding='gbk'`
+   - 涉及 PROCESS 宏（内嵌 process.sps）→ `encoding='utf-8-sig'`
+   - **绝对禁止**用 write_to_file 直接写 .sps 文件（默认 UTF-8 无 BOM，必乱码）
+
+2. **PROCESS 宏加载铁律**
+   - INSERT/INCLUDE 加载 process.sps 会**静默失败**
+   - **唯一可靠方案**：将 process.sps 全文内嵌到语法文件开头
+   - 末尾的 `process activate=1.` 是必需激活调用，**不能删除**
+
+3. **变量名铁律**
+   - PROCESS MATRIX 引擎要求变量名 **<= 8 字符**
+   - 用 `ensure_short_varnames()` 函数预处理 SAV 文件
+
+4. **路径铁律**
+   - SAV 路径必须是**绝对路径**（SPSS 工作目录不可控）
+   - 路径用单反斜杠即可
+
+5. **参数格式铁律**
+   - 参数用 `/` 分隔写在一行：`PROCESS y=Y/x=X/m=M1 M2/model=6/boot=5000.`
+   - 多个中介变量用空格分隔
+
+### 核心函数（模板中提供）
+- `generate_process_sps()` — 生成内嵌 PROCESS 宏的 .sps 文件
+- `generate_plain_sps()` — 生成普通 GBK 编码的 .sps 文件
+- `ensure_short_varnames()` — 缩短 SAV 变量名到 <= 8 字符
+
