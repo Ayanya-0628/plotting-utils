@@ -6,6 +6,7 @@
 """
 import os
 import sys
+import json
 import datetime
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,7 +87,7 @@ def create_project(name):
     date_str = datetime.date.today().isoformat()
 
     # 1. 创建目录
-    for d in ['原始数据', '交付成果']:
+    for d in ['原始数据', '需求整理', '交付成果']:
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
     # 2. 生成 step00_clean.py
@@ -176,9 +177,28 @@ if __name__ == '__main__':
         f.write(merge_script)
     print(f'  ✅ merge_all.py')
 
+    # 5. v4.0: CHANGELOG.md
+    cl = ['# \u4fee\u6539\u65e5\u5fd7\n\n']
+    cl.append(f'## [v1.0] {date_str} - \u521d\u7248\u4ea4\u4ed8\n\n')
+    cl.append('| \u6b65\u9aa4 | \u811a\u672c | \u8f93\u51fa | \u72b6\u6001 |\n|------|------|------|------|\n')
+    cl.append('| step00 | step00_clean.py | cleaned_data.xlsx | pending |\n')
+    for num2, sn2, _ in DEFAULT_STEPS:
+        cl.append(f'| step{num2} | step{num2}_{sn2}.py | {num2}_{sn2}.docx | pending |\n')
+    with open(os.path.join(base, 'CHANGELOG.md'), 'w', encoding='utf-8') as f:
+        f.writelines(cl)
+    print('  ok CHANGELOG.md')
+    # 6. v4.0: impact_map.json
+    imp = {'version':'1.0','data_source':'\u4ea4\u4ed8\u6210\u679c/cleaned_data.xlsx','steps':{}}
+    imp['steps']['step00'] = {'script':'step00_clean.py','type':'clean','outputs':['\u4ea4\u4ed8\u6210\u679c/cleaned_data.xlsx'],'variables_defined':[],'downstream':[f'step{n}' for n,_,_ in DEFAULT_STEPS]}
+    for num2, sn2, _ in DEFAULT_STEPS:
+        imp['steps'][f'step{num2}'] = {'script':f'step{num2}_{sn2}.py','type':'analysis','outputs':[f'\u4ea4\u4ed8\u6210\u679c/{num2}_{sn2}.docx'],'depends_on':['step00'],'variables_used':[],'downstream':[]}
+    with open(os.path.join(base, 'impact_map.json'), 'w', encoding='utf-8') as f:
+        json.dump(imp, f, ensure_ascii=False, indent=2)
+    print('  ok impact_map.json')
+
     print(f'\n✅ 项目 "{name}" 创建完成（分步执行架构）')
     print(f'   目录: {base}')
-    print(f'   文件: step00_clean.py + step01~06 + merge_all.py')
+    print(f'   文件: step00~06 + merge_all + CHANGELOG + impact_map')
     print(f'\n📋 下一步:')
     print(f'   1. 将客户数据放入 原始数据/')
     print(f'   2. 修改 step00_clean.py 中的文件名和清洗逻辑')

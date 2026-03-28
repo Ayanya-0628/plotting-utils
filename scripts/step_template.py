@@ -92,4 +92,12 @@ if __name__ == '__main__':
     print(f'═══ Step {STEP_CONFIG["step_number"]}: {STEP_CONFIG["step_name"]} ═══\n')
     df = load_data()
     results = analyze(df)
-    generate_report(results, df)
+    output_path = generate_report(results, df)
+
+    # v4.0: Save step run metadata
+    try:
+        from impact_analyzer import ImpactAnalyzer
+        analyzer = ImpactAnalyzer(BASE_DIR)
+        analyzer.save_step_meta(STEP_CONFIG["step_number"], output_path)
+    except Exception:
+        pass
